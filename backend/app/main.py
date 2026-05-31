@@ -36,7 +36,7 @@ def health() -> dict[str, str]:
 
 
 @app.post("/api/recognize", response_model=RecognizeResult)
-async def recognize_melody(name: str = Form(...), file: UploadFile = File(...)) -> RecognizeResult:
+def recognize_melody(name: str = Form(...), file: UploadFile = File(...)) -> RecognizeResult:
     uid = uuid.uuid4().hex[:8]
     ext = Path(file.filename or "input.wav").suffix or ".wav"
     audio_path = UPLOAD_DIR / f"{uid}_{name}{ext}"
@@ -45,12 +45,22 @@ async def recognize_melody(name: str = Form(...), file: UploadFile = File(...)) 
     with audio_path.open("wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    melody_data = audio_to_melody(audio_path, midi_path)
+    print(f"[recognize] saved audio: {audio_path} ({audio_path.stat().st_size} bytes)")
+
+    try:
+        melody_data = audio_to_melody(audio_path, midi_path)
+    except Exception as e:
+        print(f"[recognize] ERROR: {e}")
+        raise
+
+    print(f"[recognize] note_count={len(melody_data.note_events)} bpm={melody_data.bpm}")
     note_preview = [pretty_midi.note_number_to_name(n[0]) for n in melody_data.note_events[:12]]
 
     return RecognizeResult(
         name=name,
         bpm=melody_data.bpm,
+        key_root=melody_data.key_root,
+        mode=melody_data.mode,
         midi_path=str(midi_path.relative_to(BASE_DIR)),
         note_count=len(melody_data.note_events),
         note_preview=note_preview,
@@ -68,11 +78,11 @@ def arrange_song(payload: ArrangeRequest) -> ArrangeResult:
         tracks = arrange_section(
             src_midi,
             out_midi,
-            style=payload.style,
             bpm=payload.bpm,
             root=payload.key_root,
             mode=payload.mode,
             complexity=payload.complexity,
+            tracks=payload.tracks,
         )
         all_tracks.update(tracks)
         section_files.append(out_midi)

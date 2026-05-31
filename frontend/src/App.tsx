@@ -4,8 +4,8 @@ import MidiPlayer from './MidiPlayer'
 import Recorder from './Recorder'
 import type { ArrangeResult, MelodyInput, SectionType } from './types'
 
-const STYLES = ['Pop', 'R&B', 'Hip-hop', 'Rock', 'EDM', 'Lo-fi', 'Jazz', 'Cinematic', 'Chinese style', 'Acoustic']
 const SECTION_TYPES: SectionType[] = ['Intro', 'Verse', 'Chorus', 'Bridge', 'Outro']
+const ALL_TRACKS = ['Piano Chords', 'Bass', 'Drums', 'Pad']
 
 function uid() {
   return Math.random().toString(36).slice(2, 9)
@@ -13,12 +13,17 @@ function uid() {
 
 export default function App() {
   const [sections, setSections] = useState<MelodyInput[]>([{ id: uid(), name: 'Verse 1', section_type: 'Verse' }])
-  const [style, setStyle] = useState('Pop')
   const [bpm, setBpm] = useState(100)
   const [keyRoot, setKeyRoot] = useState('C')
   const [mode, setMode] = useState<'major' | 'minor'>('major')
-  const [mood, setMood] = useState('happy')
   const [complexity, setComplexity] = useState<'simple' | 'medium' | 'rich'>('medium')
+  const [selectedTracks, setSelectedTracks] = useState<string[]>(ALL_TRACKS)
+
+  const toggleTrack = (track: string) => {
+    setSelectedTracks((prev) =>
+      prev.includes(track) ? prev.filter((t) => t !== track) : [...prev, track]
+    )
+  }
   const [arranged, setArranged] = useState<ArrangeResult | null>(null)
   const [status, setStatus] = useState('Ready')
 
@@ -37,23 +42,30 @@ export default function App() {
   const uploadAndRecognize = async (section: MelodyInput) => {
     if (!section.file) return
     setStatus(`Recognizing ${section.name} ...`)
-    const form = new FormData()
-    form.append('name', section.name)
-    form.append('file', section.file)
-    const { data } = await api.post('/api/recognize', form)
-    patchSection(section.id, { midi_path: data.midi_path, bpm: data.bpm, note_preview: data.note_preview })
-    setStatus(`Recognized ${section.name}`)
+    try {
+      const form = new FormData()
+      form.append('name', section.name)
+      form.append('file', section.file)
+      const { data } = await api.post('/api/recognize', form)
+      patchSection(section.id, { midi_path: data.midi_path, bpm: data.bpm, note_preview: data.note_preview })
+      setBpm(data.bpm)
+      setKeyRoot(data.key_root)
+      setMode(data.mode as 'major' | 'minor')
+      setStatus(`Recognized ${section.name} — ${data.note_count} notes, BPM ${data.bpm}, Key ${data.key_root} ${data.mode}`)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setStatus(`Error recognizing ${section.name}: ${msg}`)
+    }
   }
 
   const generateArrangement = async () => {
     setStatus('Generating arrangement ...')
     const payload = {
-      style,
       bpm,
       key_root: keyRoot,
       mode,
-      mood,
       complexity,
+      tracks: selectedTracks,
       sections: sections.map((s) => ({
         name: s.name,
         section_type: s.section_type,
@@ -96,7 +108,8 @@ export default function App() {
                 <Recorder
                   onRecorded={(blob) => patchSection(s.id, { file: new File([blob], `${s.name}.webm`, { type: 'audio/webm' }) })}
                 />
-                {s.midi_path && <span>✅ MIDI: {s.midi_path}</span>}
+                {s.file && <span>📁 {s.file.name}</span>}
+                {s.midi_path && <span>✅ MIDI ready</span>}
                 {s.note_preview?.length ? <span>Notes: {s.note_preview.join(', ')}</span> : null}
               </div>
             </div>
@@ -107,12 +120,37 @@ export default function App() {
       <section className="card mt-6">
         <h2 className="mb-4 text-xl font-semibold">2) Arrange Settings</h2>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <select className="input" value={style} onChange={(e) => setStyle(e.target.value)}>{STYLES.map((s) => <option key={s}>{s}</option>)}</select>
-          <input className="input" type="number" value={bpm} min={60} max={200} onChange={(e) => setBpm(Number(e.target.value))} />
-          <input className="input" value={keyRoot} onChange={(e) => setKeyRoot(e.target.value)} />
-          <select className="input" value={mode} onChange={(e) => setMode(e.target.value as 'major' | 'minor')}><option>major</option><option>minor</option></select>
-          <select className="input" value={mood} onChange={(e) => setMood(e.target.value)}><option>happy</option><option>sad</option><option>chill</option><option>energetic</option><option>dramatic</option></select>
-          <select className="input" value={complexity} onChange={(e) => setComplexity(e.target.value as 'simple' | 'medium' | 'rich')}><option>simple</option><option>medium</option><option>rich</option></select>
+          <label className="text-sm text-slate-600">
+            BPM
+            <input className="input mt-1 w-full" type="number" value={bpm} min={60} max={200} onChange={(e) => setBpm(Number(e.target.value))} />
+          </label>
+          <label className="text-sm text-slate-600">
+            Key
+            <input className="input mt-1 w-full" value={keyRoot} onChange={(e) => setKeyRoot(e.target.value)} />
+          </label>
+          <label className="text-sm text-slate-600">
+            Mode
+            <select className="input mt-1 w-full" value={mode} onChange={(e) => setMode(e.target.value as 'major' | 'minor')}><option>major</option><option>minor</option></select>
+          </label>
+          <label className="text-sm text-slate-600">
+            Complexity
+            <select className="input mt-1 w-full" value={complexity} onChange={(e) => setComplexity(e.target.value as 'simple' | 'medium' | 'rich')}><option>simple</option><option>medium</option><option>rich</option></select>
+          </label>
+        </div>
+        <div className="mt-4">
+          <p className="mb-2 text-sm font-medium text-slate-700">Tracks</p>
+          <div className="flex flex-wrap gap-3">
+            {ALL_TRACKS.map((track) => (
+              <label key={track} className="flex cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={selectedTracks.includes(track)}
+                  onChange={() => toggleTrack(track)}
+                />
+                {track}
+              </label>
+            ))}
+          </div>
         </div>
 
         <button

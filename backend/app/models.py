@@ -17,18 +17,19 @@ class MelodySection(BaseModel):
 
 
 class ArrangeRequest(BaseModel):
-    style: str = "Pop"
     bpm: int = Field(default=100, ge=60, le=200)
     key_root: str = "C"
     mode: Literal["major", "minor"] = "major"
-    mood: Mood = "happy"
     complexity: Complexity = "medium"
+    tracks: list[str] = ["Piano Chords", "Bass", "Drums", "Pad"]
     sections: list[MelodySection]
 
 
 class RecognizeResult(BaseModel):
     name: str
     bpm: int
+    key_root: str
+    mode: str
     midi_path: str
     note_count: int
     note_preview: list[str]

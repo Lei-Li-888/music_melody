@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as Tone from 'tone'
 import { Midi } from '@tonejs/midi'
 
@@ -6,33 +6,103 @@ interface Props {
   url: string
 }
 
-export default function MidiPlayer({ url }: Props) {
-  const [loading, setLoading] = useState(false)
+type State = 'idle' | 'loading' | 'playing' | 'paused'
 
-  const play = async () => {
-    setLoading(true)
+export default function MidiPlayer({ url }: Props) {
+  const [state, setState] = useState<State>('idle')
+  const synthsRef = useRef<Tone.PolySynth[]>([])
+  const durationRef = useRef(0)
+
+  useEffect(() => {
+    return () => {
+      Tone.Transport.stop()
+      Tone.Transport.cancel()
+      synthsRef.current.forEach((s) => s.dispose())
+    }
+  }, [url])
+
+  const load = async () => {
+    setState('loading')
     await Tone.start()
+    Tone.Transport.stop()
+    Tone.Transport.cancel()
+    synthsRef.current.forEach((s) => s.dispose())
+
     const bytes = await fetch(url).then((r) => r.arrayBuffer())
     const midi = new Midi(bytes)
-    const now = Tone.now() + 0.1
+    durationRef.current = midi.duration
 
-    const synths = midi.tracks.map((t) => new Tone.PolySynth(Tone.Synth).toDestination())
-    midi.tracks.forEach((track, idx) => {
+    const synths = midi.tracks.map(() =>
+      new Tone.PolySynth(Tone.Synth).toDestination()
+    )
+    synthsRef.current = synths
+
+    midi.tracks.forEach((track, i) => {
       track.notes.forEach((note) => {
-        synths[idx].triggerAttackRelease(note.name, note.duration, now + note.time, note.velocity)
+        Tone.Transport.schedule((time) => {
+          synths[i].triggerAttackRelease(note.name, note.duration, time, note.velocity)
+        }, note.time)
       })
     })
 
-    const maxDuration = midi.duration
-    setTimeout(() => {
-      synths.forEach((s) => s.dispose())
-      setLoading(false)
-    }, maxDuration * 1000 + 400)
+    Tone.Transport.schedule(() => {
+      setState('idle')
+    }, durationRef.current + 0.5)
+
+    Tone.Transport.start()
+    setState('playing')
+  }
+
+  const pause = () => {
+    Tone.Transport.pause()
+    setState('paused')
+  }
+
+  const resume = () => {
+    Tone.Transport.start()
+    setState('playing')
+  }
+
+  const stop = () => {
+    Tone.Transport.stop()
+    Tone.Transport.cancel()
+    synthsRef.current.forEach((s) => s.dispose())
+    synthsRef.current = []
+    setState('idle')
   }
 
   return (
-    <button className="rounded bg-emerald-600 px-3 py-2 text-sm text-white" onClick={play} disabled={loading} type="button">
-      {loading ? 'Playing…' : 'Play MIDI'}
-    </button>
+    <div className="flex items-center gap-2">
+      {state === 'idle' && (
+        <button className="rounded bg-emerald-600 px-3 py-2 text-sm text-white" onClick={load} type="button">
+          Play
+        </button>
+      )}
+      {state === 'loading' && (
+        <button className="rounded bg-slate-400 px-3 py-2 text-sm text-white" disabled type="button">
+          Loading…
+        </button>
+      )}
+      {state === 'playing' && (
+        <>
+          <button className="rounded bg-yellow-500 px-3 py-2 text-sm text-white" onClick={pause} type="button">
+            Pause
+          </button>
+          <button className="rounded bg-rose-500 px-3 py-2 text-sm text-white" onClick={stop} type="button">
+            Stop
+          </button>
+        </>
+      )}
+      {state === 'paused' && (
+        <>
+          <button className="rounded bg-emerald-600 px-3 py-2 text-sm text-white" onClick={resume} type="button">
+            Resume
+          </button>
+          <button className="rounded bg-rose-500 px-3 py-2 text-sm text-white" onClick={stop} type="button">
+            Stop
+          </button>
+        </>
+      )}
+    </div>
   )
 }
